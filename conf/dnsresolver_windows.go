@@ -82,6 +82,13 @@ func resolveHostnameOnce(name string) (resolvedIPString string, err error) {
 	return
 }
 
+// ResolveEndpointHostname resolves an endpoint hostname once. It is used by the
+// tunnel service to periodically refresh endpoints without the startup retry
+// delay.
+func ResolveEndpointHostname(name string) (string, error) {
+	return resolveHostnameOnce(name)
+}
+
 func (config *Config) ResolveEndpoints() error {
 	for i := range config.Peers {
 		if config.Peers[i].Endpoint.IsEmpty() {

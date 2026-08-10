@@ -28,6 +28,8 @@ type tunnelService struct {
 	Path string
 }
 
+const endpointDNSRefreshInterval = time.Minute
+
 func (service *tunnelService) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (svcSpecificEC bool, exitCode uint32) {
 	serviceState := svc.StartPending
 	changes <- svc.Status{State: serviceState}
@@ -114,6 +116,7 @@ func (service *tunnelService) Execute(args []string, r <-chan svc.ChangeRequest,
 		return
 	}
 	config.DeduplicateNetworkEntries()
+	endpointDNSMonitor := newEndpointDNSMonitor(config)
 
 	log.SetPrefix(fmt.Sprintf("[%s] ", config.Name))
 
@@ -150,6 +153,7 @@ func (service *tunnelService) Execute(args []string, r <-chan svc.ChangeRequest,
 		serviceError = services.ErrorDNSLookup
 		return
 	}
+	endpointDNSMonitor.initialize(config)
 
 	log.Println("Creating network adapter")
 	for i := range 15 {
@@ -221,6 +225,15 @@ func (service *tunnelService) Execute(args []string, r <-chan svc.ChangeRequest,
 
 	changes <- svc.Status{State: serviceState, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 
+	var endpointDNSTicker *time.Ticker
+	var endpointDNSTickerC <-chan time.Time
+	if len(endpointDNSMonitor.entries) > 0 {
+		endpointDNSTicker = time.NewTicker(endpointDNSRefreshInterval)
+		endpointDNSTickerC = endpointDNSTicker.C
+		defer endpointDNSTicker.Stop()
+		log.Printf("Monitoring endpoint DNS names every %v", endpointDNSRefreshInterval)
+	}
+
 	var started bool
 	for {
 		select {
@@ -243,6 +256,8 @@ func (service *tunnelService) Execute(args []string, r <-chan svc.ChangeRequest,
 		case e := <-watcher.errors:
 			serviceError, err = e.serviceError, e.err
 			return
+		case <-endpointDNSTickerC:
+			endpointDNSMonitor.refresh(adapter, config, watcher)
 		}
 	}
 }
